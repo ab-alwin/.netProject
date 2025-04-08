@@ -15,14 +15,14 @@ variables:
   buildConfiguration: 'Release'
 
 pool:
-  name: agent1  # your custom self-hosted agent
+  name: agent1
 
 stages:
-# ---------------------- STAGE 1: BUILD ----------------------
-- stage: Build
-  displayName: 'Build & Test'
+# ---------------- STAGE 1: BUILD & DEPLOY TO DEV ----------------
+- stage: Build_Dev
+  displayName: 'Build & Deploy to Dev'
   jobs:
-    - job: BuildAndTest
+    - job: DevJob
       steps:
         - task: UseDotNet@2
           inputs:
@@ -42,7 +42,6 @@ stages:
           displayName: 'Publish App'
 
         - task: ArchiveFiles@2
-          displayName: 'Create ZIP Package'
           inputs:
             rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/output'
             includeRootFolder: false
@@ -51,36 +50,21 @@ stages:
             replaceExistingArchive: true
 
         - task: PublishBuildArtifacts@1
-          displayName: 'Publish Artifact'
           inputs:
             pathToPublish: '$(Build.ArtifactStagingDirectory)/webapp.zip'
             artifactName: 'drop'
 
-# ---------------------- STAGE 2: DEV DEPLOY ----------------------
-- stage: Deploy_Dev
-  displayName: 'Deploy to Dev'
-  dependsOn: Build
-  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'dev'))
-  jobs:
-    - deployment: DeployDev
-      environment: 'dev'
-      strategy:
-        runOnce:
-          deploy:
-            steps:
-              - task: AzureWebApp@1
-                displayName: 'Deploy to Dev App'
-                inputs:
-                  azureSubscription: 'azureconnection1'
-                  appType: 'webApp'  # for Windows App Service
-                  appName: 'webappDev2'
-                  package: '$(Pipeline.Workspace)/drop/webapp.zip'
+        - task: AzureWebApp@1
+          inputs:
+            azureSubscription: 'azureconnection1'
+            appType: 'webApp'
+            appName: 'webappDev2'
+            package: '$(Build.ArtifactStagingDirectory)/output'
 
-# ---------------------- STAGE 3: STAGING DEPLOY ----------------------
+# ---------------- STAGE 2: DEPLOY TO STAGING ----------------
 - stage: Deploy_Staging
   displayName: 'Deploy to Staging'
-  dependsOn: Build
-  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'staging'))
+  dependsOn: Build_Dev
   jobs:
     - deployment: DeployStaging
       environment: 'staging'
@@ -88,19 +72,20 @@ stages:
         runOnce:
           deploy:
             steps:
+              - task: DownloadBuildArtifacts@0
+                inputs:
+                  artifactName: 'drop'
               - task: AzureWebApp@1
-                displayName: 'Deploy to Staging App'
                 inputs:
                   azureSubscription: 'azureconnection1'
                   appType: 'webApp'
                   appName: 'webApp-Staging2'
                   package: '$(Pipeline.Workspace)/drop/webapp.zip'
 
-# ---------------------- STAGE 4: PROD DEPLOY ----------------------
+# ---------------- STAGE 3: DEPLOY TO PROD ----------------
 - stage: Deploy_Prod
   displayName: 'Deploy to Production'
-  dependsOn: Build
-  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+  dependsOn: Deploy_Staging
   jobs:
     - deployment: DeployProd
       environment: 'prod'
@@ -108,8 +93,10 @@ stages:
         runOnce:
           deploy:
             steps:
+              - task: DownloadBuildArtifacts@0
+                inputs:
+                  artifactName: 'drop'
               - task: AzureWebApp@1
-                displayName: 'Deploy to Production App'
                 inputs:
                   azureSubscription: 'azureconnection1'
                   appType: 'webApp'
